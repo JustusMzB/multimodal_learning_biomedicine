@@ -1,4 +1,5 @@
 import numpy as np
+from argparse import ArgumentParser
 
 def step_activation(threshold):
     def activation(x):
@@ -27,8 +28,13 @@ class HopfieldNetwork:
         np.fill_diagonal(self.weights, 0)
 
 if __name__=='__main__':
+    # For a pattern of size 4, train simple hopfield network and check all combinations of input patterns for their results
+    parser = ArgumentParser()
+    parser.add_argument("--pattern", type=int, nargs=4, default=[1, 0, 1, 0], help="Pattern to store in the network, four 1s or 0s. Example: 1 0 1 1")
+
+    args = parser.parse_args()
     pattern_size = 4
-    pattern = np.array([1, 0, 1, 0])
+    pattern = np.array(args.pattern)
     print(f"Pattern: {pattern}")
     hopfield = HopfieldNetwork(pattern_size)
     hopfield.train(pattern)
