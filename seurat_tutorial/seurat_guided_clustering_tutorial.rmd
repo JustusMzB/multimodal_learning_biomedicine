@@ -1,0 +1,148 @@
+# Seurat: Guided Clustering Tutorial
+[Click here to go to the tutorial being followed in this notebook](https://satijalab.org/seurat/articles/pbmc3k_tutorial)
+```{r}
+# Install packages if required
+# install.packages(c('dplyr', 'Seurat', 'patchwork'))
+library(dplyr)
+library(Seurat)
+library(patchwork)
+```
+With packages installed and loaded, we can proceed to loading the data in a SeuratObject.
+```{r}
+# Load the data
+pbmc.data <- Read10X(data.dir = "filtered_gene_bc_matrices/hg19/")
+pbmc <- CreateSeuratObject(counts = pbmc.data, project = "pbmc3k", min.cells = 3, min.features = 200)
+pbmc
+```
+```{r}
+pbmc.data[c('CD3D', 'TCL1A', 'MS4A1'), 1:30] # First 30 cells counts for the genes
+```
+```{r}
+# Demonstrate sparse matrix representation storage efficiency
+dense.size <- object.size(as.matrix(pbmc.data))
+dense.size
+sparse.size <- object.size(pbmc.data)
+sparse.size
+```
+## Quality conntrol preprocessing
+```{r}
+# Calculate how much of genes are mitochondrial
+# Dying cells experience 'mitochondrial contamination'
+# MT- prefix is used to denote mitochondrial genes
+pbmc[['percent.mt']] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+# Visualize some quality measures: How many features were uniquely registered? How many counts were registered? How much of the data is mitochondrial?
+VlnPlot(pbmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+```{r}
+# Scatter features for correlation observation
+
+# Corr between rna count and mitochondrial content
+plot1 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "percent.mt")
+# Corr between rna count and unique feature number
+plot2 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+```
+```{r}
+pbmc <- subset(pbmc, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 5)
+# We also use log-normalization,
+# Normalize feature expression
+# Log transform for approx. Homoscedasticity
+pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+```
+## Feature selection
+After filtering and normalizing our data, we now want to extract
+relevant features. First, we Identify features with high variability.
+We assume that non-variable features are fairly irrelevant for most analyses.
+```{r}
+# Identify variable features
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+top10 <- head(VariableFeatures(pbmc), 10)
+# Plot variable features
+plot1 <- VariableFeaturePlot(pbmc)
+plot2 <- LabelPoints(plot = plot1, points =top10, repel = TRUE)
+plot1 + plot2
+```
+```{r}
+all.genes <- rownames(pbmc)
+pbmc <- ScaleData(pbmc, features = all.genes)
+```
+## Dimensionality reduction
+We now want to observe correlations between feature expressions and principal components.
+Seurat makes this extremely comfortable.
+
+```{r}
+pbmc <- RunPCA(pbmc, features = VariableFeatures(object = pbmc))
+print(pbmc[["pca"]], dims = 1:5, nfeatures = 5)
+plot1 <- VizDimLoadings(pbmc, dims = 1:2, reduction = "pca")
+plot2 <- DimPlot(pbmc, reduction = "pca") + NoLegend()
+plot1 + plot2
+```
+```{r}
+DimHeatmap(pbmc, dims = 1:15, cells = 500, balanced = TRUE)
+```
+## Determine clustering dimensions for partitioning clustering
+```{r}
+ElbowPlot(pbmc)
+```
+In most clustering cases, I would pick 7 or 8 PCs for clustering. However,
+the tutorial advises us to err towards the high side of dimensions, as some
+rare biomarkers can blur with background noise.
+
+## Clustering
+From a data scientist perspective, the clustering approach in the 
+tutorial seems unusual. They construct a neighborhood graph using distances
+between PCs, give weights according to neighborhood overlap, and then use
+community detection to partition the graph.
+I would have first attempted simpler methods such as K-means or some agglomerative
+measure, if required with different distance metrics.
+
+```{r}
+pbmc <- FindNeighbors(pbmc, dims = 1:10)
+pbmc <- FindClusters(pbmc, resolution = 0.5)
+head(Idents(pbmc), 5)
+```
+
+## Visualize the results
+For visualization of our clustering, we prefer to use 
+a nonlinear method like UMAP/t-SNE.
+```{r}
+pbmc <- RunUMAP(pbmc, dims = 1:10)
+DimPlot(pbmc, reduction = "umap")
+```
+```{r}
+saveRDS(pbmc, "./output/pbmc_tutorial.rds")
+```
+## Differential expression analysis
+```{r}
+# Distinguishing features between all clusters and cluster 2 (asymmetric!)
+cluster2.markers <- FindMarkers(pbmc, indent.1 = 2)
+print(cluster2.markers, n = 5)
+```
+```{r}
+# Distinguishing features between cluster 5 and clusters 0 and 3 (asymmetric!)
+cluster5.markers <- FindMarkers(pbmc, ident.1 = 5, ident.2 = c(0, 3))
+print(cluster5.markers, n = 5)
+```
+```{r}
+# Now do it for EVERYTHING!
+pbmc.markers <- FindAllMarkers(pbmc, only.pos = TRUE)
+```
+```{r}
+pbmc.markers %>% 
+group_by(cluster) %>% 
+dplyr::filter(avg_log2FC > 1)
+```
+
+```{r}
+cluster0.markers <- FindMarkers(pbmc, ident.1 = 0, logfc.threshold = 0.25, test.use = "roc", only.pos = TRUE)
+VlnPlot(pbmc, features=c("MS4A1", "CD79A"))
+```
+## My understanding of what we have done
+First, we loaded the data, performed some cleaning, then normalization.
+We then proceeded to switch to PCA space for clustering using some (to me) exotic
+community detection method.
+We then proceeded to assume clusters as cell groups in some differential 
+expression analysis, leaving PCA space again. Plotting was done with UMAP.
+
+For now, I am skipping the later part of this tutorial, as I think it is too
+knowledge driven for me to follow as a non-biologist.
